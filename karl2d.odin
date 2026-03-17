@@ -742,7 +742,7 @@ draw_rect_ex :: proc(r: Rect, origin: Vec2, rot: f32, c: Color) {
 
 // Draw the outline of a rectangle with a specific thickness. The outline is drawn using four
 // rectangles.
-draw_rect_outline :: proc(r: Rect, thickness: f32, color: Color) {
+draw_rect_outline_old :: proc(r: Rect, thickness: f32, color: Color) {
 	t := thickness
 	
 	// Based on DrawRectangleLinesEx from Raylib
@@ -809,7 +809,7 @@ draw_circle :: proc(center: Vec2, radius: f32, color: Color, segments := 16) {
 }
 
 // Like `draw_circle` but only draws the outer edge of the circle.
-draw_circle_outline :: proc(center: Vec2, radius: f32, thickness: f32, color: Color, segments := 16) {
+draw_circle_outline_old :: proc(center: Vec2, radius: f32, thickness: f32, color: Color, segments := 16) {
 	prev := center + {radius, 0}
 	for s in 1..=segments {
 		sr := (f32(s)/f32(segments)) * 2*math.PI
@@ -3223,7 +3223,7 @@ batch_vertex :: proc(v: Vec2, uv: Vec2, color: Color) {
 
 VERTEX_BUFFER_MAX :: 1000000
 
-@(private="file")
+@(private)
 s: ^State
 
 @(private="file")
