@@ -531,5 +531,6 @@ WL_State :: struct {
 	window_render_glue: Window_Render_Glue,
 }
 
+@(private="file")
 s: ^WL_State
 
