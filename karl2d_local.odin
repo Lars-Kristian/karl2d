@@ -721,3 +721,39 @@ line_intersect :: proc(p1, p2, p3, p4: Vec2) -> (intr: Vec2, ok: bool = false) {
 
     return
 }
+
+draw_quad :: proc(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, color: Color) {
+	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 4 > len(s.vertex_buffer_cpu) {
+		draw_current_batch()
+	}
+
+	if s.batch_texture != s.shape_drawing_texture {
+		draw_current_batch()
+	}
+
+	s.batch_texture = s.shape_drawing_texture
+
+	batch_vertex(p1, {0, 0}, color)
+	batch_vertex(p2, {0, 0}, color)
+	batch_vertex(p3, {0, 0}, color)
+
+	batch_vertex(p1, {0, 0}, color)
+	batch_vertex(p3, {0, 0}, color)
+	batch_vertex(p4, {0, 0}, color)
+}
+
+draw_tris :: proc(p1: Vec2, p2: Vec2, p3: Vec2, color: Color) {
+	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 3 > len(s.vertex_buffer_cpu) {
+		draw_current_batch()
+	}
+
+	if s.batch_texture != s.shape_drawing_texture {
+		draw_current_batch()
+	}
+
+	s.batch_texture = s.shape_drawing_texture
+
+	batch_vertex(p1, {0, 0}, color)
+	batch_vertex(p2, {0, 0}, color)
+	batch_vertex(p3, {0, 0}, color)
+}
