@@ -1,47 +1,66 @@
-package dual_grid_tilemap_example
+package karl2d_example_dual_grid_tilemap
 
 import k2 "../.."
-import "core:fmt"
-import "core:math/linalg"
+import "core:math"
 
-Vec2 :: k2.Vec2
-Vec3 :: k2.Vec3
-Vec4 :: k2.Vec4
+// 16x16 pixel tiles
+TILE_SIZE :: 16
 
-Rect :: k2.Rect
+// World is 20x20 tiles (or 16*20x16*20 pixels large)
+WORLD_WIDTH :: 20
 
-Camera :: k2.Camera
-CameraBounds :: struct {
-	min_x:  f32,
-	min_y:  f32,
-	max_x:  f32,
-	max_y:  f32,
-	width:  f32,
-	height: f32,
+// The height of the toolbar at the bottom
+BOTTOM_BAR_HEIGHT :: 36
+
+// By default, everything is of .Grass type. We just store what kind of ground each tile has, the
+// actual selection of tile is done at runtime based on the values of the neighboring tiles.
+tiles: [WORLD_WIDTH*WORLD_WIDTH]Tile_Type
+
+// This texture contains the pieces that look like a "road" or "path"
+tileset_path_texture: k2.Texture
+
+// Maps a bitmask to a coordinate within the tileset. The bits mean:
+// Bit 4: Top-left neighbor exists
+// Bit 3: Top-right neighbor exists
+// Bit 2: Bottom-right neighbor exists
+// Bit 1: Bottom-left neighbor exists
+//
+// Look at how the `tileset_path.png` looks in order to better understand why we map to these
+// specific coordinates.
+DUAL_GRID_MASK_TO_TXTY := [16][2]int {
+	{0, 3}, // 0000
+	{3, 3}, // 0001
+	{0, 2}, // 0010
+	{1, 2}, // 0011
+	{1, 3}, // 0100
+	{0, 1}, // 0101
+	{1, 0}, // 0110
+	{2, 2}, // 0111
+	{0, 0}, // 1000
+	{3, 2}, // 1001
+	{2, 3}, // 1010
+	{3, 1}, // 1011
+	{3, 0}, // 1100
+	{2, 0}, // 1101
+	{1, 1}, // 1110
+	{2, 1}, // 1111
 }
 
-TilemapGrid :: struct {
-	width:    int,
-	height:   int,
-	position: Vec2,
-	cell_size: Vec2,
-	data:     []u8,
+Tile_Type :: enum {
+	Grass,
+	Path,
 }
 
-camera: k2.Camera
-tilemap_grid: TilemapGrid
-tilemap_texture: k2.Texture
+// Program entry point for desktop builds. Web builds call `init` and `step` directly.
+main :: proc() {
+	init()
+	for step() {}
+	shutdown()
+}
 
 init :: proc() {
-	k2.init(1200, 900, "Karl2D Dual Grid Tilemap Demo", {window_mode = .Windowed_Resizable})
-
-	tilemap_texture = k2.load_texture_from_file("./tilemap.png")
-
-	grid_size := 16
-	cell_size := Vec2{16, 16}
-	tilemap_grid = {grid_size, grid_size, cell_size * 2, cell_size, make([]u8, grid_size * grid_size)}
-
-	reset_camera()
+	k2.init(800, 640, "Karl2D: Dual Grid Tilemap", options = { window_mode = .Windowed_Resizable })
+	tileset_path_texture = k2.load_texture_from_bytes(#load("tileset_path.png"))
 }
 
 step :: proc() -> bool {
@@ -49,297 +68,126 @@ step :: proc() -> bool {
 		return false
 	}
 
-	screen_size := Vec2{f32(k2.get_screen_width()), f32(k2.get_screen_height())}
-	mouse_screen_pos := k2.get_mouse_position()
-	mouse_world_pos := k2.screen_to_world(k2.get_mouse_position(), camera)
-	frame_time := k2.get_frame_time()
+	camera := k2.Camera {
+		// Fit the whole world, but also zoom out a little so the UI fits
+		zoom = f32(k2.get_screen_height() - BOTTOM_BAR_HEIGHT)/(WORLD_WIDTH*TILE_SIZE),
+		
+		// Center the world.
+		target = k2.Vec2{
+			TILE_SIZE * WORLD_WIDTH,
+			0,
+		} * 0.5 - {TILE_SIZE/2, TILE_SIZE/2},
+		offset = k2.Vec2{f32(k2.get_screen_width()), 0} * 0.5,
+	}
 
-	update_camera(&camera, screen_size)
-	update_tilemap_grid(&tilemap_grid, mouse_world_pos)
+	mouse_pos_world := k2.screen_to_world(k2.get_mouse_position(), camera)
+	grid_x := int(math.floor(mouse_pos_world.x / TILE_SIZE))
+	grid_y := int(math.floor(mouse_pos_world.y / TILE_SIZE))
+	hovered_grid_rect: k2.Rect
 
-	if k2.key_went_down(.T) do increment_texture_option()
+	// This does the editing of the tiles, given that we are hovering within the area of the tiles.
+	if grid_x >= 0 && grid_x < WORLD_WIDTH - 1 && grid_y >= 0 && grid_y < WORLD_WIDTH - 1 {
+		hovered_grid_idx := grid_y*WORLD_WIDTH+grid_x
+		grid_pos := k2.Vec2 { f32(grid_x) * TILE_SIZE, f32(grid_y) *TILE_SIZE }
+		hovered_grid_rect = k2.rect_from_pos_size(grid_pos, {TILE_SIZE, TILE_SIZE})
 
-	// DRAW WORLD
+		modifiers := k2.get_held_modifiers()
+
+		if modifiers == k2.MODIFIERS_NONE && k2.mouse_button_is_held(.Left) {
+			tiles[hovered_grid_idx] = .Path
+		}
+
+		if (
+			(modifiers == { .Control } && k2.mouse_button_is_held(.Left)) ||
+			k2.mouse_button_is_held(.Right)
+		) {
+			tiles[hovered_grid_idx] = .Grass
+		}
+	}
+
+	k2.clear(k2.BLUE)
 	k2.set_camera(camera)
-	k2.clear(k2.DARK_GRAY)
 
-	// DRAW GRID LINES
-	draw_grid_lines_inside_camera_bounds(&camera, screen_size)
+	for tile_idx in 0..<len(tiles) {
+		x := tile_idx % WORLD_WIDTH
+		y := tile_idx / WORLD_WIDTH
 
+		tile_type :: proc(x, y: int) -> Tile_Type {
+			if x < 0 || y < 0 || x >= WORLD_WIDTH - 1 || y >= WORLD_WIDTH - 1 {
+				return .Grass
+			}
 
-	// DRAW TILEMAP GRID
-	render_grid(&tilemap_grid)
-	
-	render_dual_grid(&tilemap_grid, tilemap_texture, texture_options[texture_option_index].index)
+			return tiles[y*WORLD_WIDTH+x]
+		}
 
-	render_grid_selection(&tilemap_grid, mouse_world_pos)
+		mask := 0
 
-	/*
-	// DRAW SELECTION
-	tmp := mouse_world_pos / cell_size
-	if tmp.x < 0 do tmp.x -= 1
-	if tmp.y < 0 do tmp.y -= 1
-	grid_position := Vec2{f32(int(tmp.x)), f32(int(tmp.y))}
+		if tile_type(x-1, y-1) == .Path {
+			mask |= 1 // TL
+		}
+		if tile_type(x, y-1) == .Path {
+			mask |= 2 // TR
+		}
+		if tile_type(x, y) == .Path {
+			mask |= 4 // BR
+		}
+		if tile_type(x-1, y) == .Path {
+			mask |= 8 // BL
+		}
 
-	k2.draw_rect_vec(cell * grid_position, cell, k2.Color{0, 0, 0, 128})
+		txty := DUAL_GRID_MASK_TO_TXTY[mask]
+		tx := txty.x
+		ty := txty.y
 
-	//DRAW SHAPES
-	k2.draw_circle({128, 0}, 10, k2.RED)
-	k2.draw_circle({0, 128}, 10, k2.GREEN)
-	k2.draw_circle({0, 0}, 10, k2.BLUE)
-	*/
+		tile_rect := k2.Rect {
+			x = f32(tx) * TILE_SIZE,
+			y = f32(ty) * TILE_SIZE,
+			w = TILE_SIZE,
+			h = TILE_SIZE,
+		}
+
+		// Note the half-tile offset here: This is what "undoes" the half-tile offset that dual
+		// tile grids need.
+		pos := k2.Vec2 {
+			f32(x) * TILE_SIZE - TILE_SIZE/2,
+			f32(y) * TILE_SIZE - TILE_SIZE/2,
+		}
+
+		// Always draw "grass" below the tile, as they have transparent pixels.
+		k2.draw_rect(k2.rect_from_pos_size(pos, {TILE_SIZE, TILE_SIZE}), k2.LIGHT_GREEN)
+
+		k2.draw_texture_section(
+			tileset_path_texture,
+			tile_rect,
+			pos,
+		)
+	}
+
+	k2.draw_rect(hovered_grid_rect, {255, 255, 255, 128})
+
+	//
+	// BOTTOM BAR
+	//
 
 	k2.set_camera(nil)
+	screen_rect := k2.rect_from_pos_size({}, k2.get_screen_size())
+	bottom_bar := k2.rect_cut_bottom(&screen_rect, BOTTOM_BAR_HEIGHT, 0)
+	k2.draw_rect(bottom_bar, k2.DARK_GRAY)
+	bottom_bar = k2.rect_shrink(bottom_bar, 4, 4)
+	k2.draw_text("Paint path: LMB | Erase path: RMB or Ctrl + LMB", k2.rect_top_left(bottom_bar), bottom_bar.h, k2.WHITE)
+	source_code_rect := k2.rect_cut_right(&bottom_bar, k2.ui_button_width("Source Code", bottom_bar.h) + 50, 0)
 
-	text := fmt.tprint("-[LFM] Add   -[RMB] Remove   -[MMB] Pan   -[Z/X] Rotate   -[R] Reset   -[T] Texture: ", texture_options[texture_option_index].text)
-	
-	text_padding := f32(4)
-	text_size := k2.measure_text(text, 22) + {text_padding, text_padding} * 2
-	k2.draw_rect({0, 0, text_size.x, text_size.y}, k2.Color{0, 0, 0, 128})
-	k2.draw_text(text, {text_padding, text_padding}, 22, k2.WHITE)
+	if k2.ui_button(source_code_rect, "Source Code") {
+		k2.open_url("https://github.com/karl-zylinski/karl2d/blob/master/examples/dual_grid_tilemap/dual_grid_tilemap.odin")
+	}
 
 	k2.present()
 	free_all(context.temp_allocator)
+
 	return true
 }
 
 shutdown :: proc() {
+	k2.destroy_texture(tileset_path_texture)
 	k2.shutdown()
-}
-
-main :: proc() {
-	init()
-	for step() {}
-	shutdown()
-}
-
-update_camera :: proc(camera: ^k2.Camera, screen_size: Vec2) {
-	frame_time := k2.get_frame_time()
-
-	// CAMERA PANNING
-
-	camera_target_movement: Vec2
-	if k2.mouse_button_is_held(.Middle) || (k2.mouse_button_is_held(.Left) && k2.key_is_held(.Left_Control)) {
-		camera_target_movement -= k2.get_mouse_delta() / camera.zoom
-	}
-
-	CAMERA_KEY_MOVE_SPEED :: 300 // in screen pixels/sec
-	camera_key_move_delta := CAMERA_KEY_MOVE_SPEED * frame_time / camera.zoom
-	if k2.key_is_held(.Right) {camera_target_movement.x += camera_key_move_delta}
-	if k2.key_is_held(.Left) {camera_target_movement.x -= camera_key_move_delta}
-	if k2.key_is_held(.Down) {camera_target_movement.y += camera_key_move_delta}
-	if k2.key_is_held(.Up) {camera_target_movement.y -= camera_key_move_delta}
-
-	// Multiplying camera movement with rotation matrix makes it move like the player expects,
-	// relative to the axes of the window, not the axes of the camera.
-	rotation_matrix := linalg.matrix2_rotate(-camera.rotation)
-	camera.target += rotation_matrix * camera_target_movement
-
-	camera.target = {clamp(camera.target.x, -1000, 1000), clamp(camera.target.y, -1000, 1000)}
-
-
-	// CAMERA ZOOM
-
-	mouse_wheel_delta := k2.get_mouse_wheel_delta()
-	if mouse_wheel_delta > 0 || k2.key_went_down(.NP_Add) {camera.zoom += .3}
-	if mouse_wheel_delta < 0 || k2.key_went_down(.NP_Subtract) {camera.zoom -= .3}
-
-	camera.zoom = clamp(camera.zoom, 1, 4)
-	camera.offset = screen_size / 2
-
-
-	// CAMERA ROTATION
-
-	CAMERA_KEY_ROTATION_SPEED :: 1 // in rads/sec
-	camera_key_rotation_delta := CAMERA_KEY_ROTATION_SPEED * frame_time
-	if k2.key_is_held(.Z) {camera.rotation += camera_key_rotation_delta}
-	if k2.key_is_held(.X) {camera.rotation -= camera_key_rotation_delta}
-
-
-	// CAMERA RESET
-
-	if k2.key_went_down(.R) do reset_camera()
-}
-
-reset_camera :: proc(){
-	camera.target = tilemap_grid.position + tilemap_grid.cell_size * {f32(tilemap_grid.width), f32(tilemap_grid.height)} * 0.5;
-	camera.zoom = 3
-	camera.rotation = 0
-}
-
-get_camera_bounds :: proc(camera: ^Camera, screen_size: Vec2) -> CameraBounds {
-
-	points := []Vec2 {
-		k2.screen_to_world({0, 0}, camera^),
-		k2.screen_to_world({screen_size.x, 0}, camera^),
-		k2.screen_to_world({0, screen_size.y}, camera^),
-		k2.screen_to_world(screen_size, camera^),
-	}
-
-	min_x := points[0].x
-	max_x := points[0].x
-	min_y := points[0].y
-	max_y := points[0].y
-
-	for point in points {
-		if point.x < min_x do min_x = point.x
-		if point.x > max_x do max_x = point.x
-		if point.y < min_y do min_y = point.y
-		if point.y > max_y do max_y = point.y
-	}
-
-	return {min_x, min_y, max_x, max_y, max_x - min_x, max_y - min_y}
-}
-
-draw_grid_lines_inside_camera_bounds :: proc(camera: ^Camera, screen_size: Vec2) {
-
-	camera_bounds := get_camera_bounds(camera, screen_size)
-
-	/*
-	DEBUG_GRID_LINES :: true
-	if DEBUG_GRID_LINES {
-
-		padding: f32 = 64
-		camera_bounds.min_x += padding
-		camera_bounds.min_y += padding
-		camera_bounds.max_x -= padding
-		camera_bounds.max_y -= padding
-		camera_bounds.width -= padding * 2
-		camera_bounds.height -= padding * 2
-
-		k2.draw_rect_outline(
-			{camera_bounds.min_x, camera_bounds.min_y, camera_bounds.width, camera_bounds.height},
-			2,
-			k2.YELLOW,
-		)
-	}
-	*/
-	GRID_LINE_THICKNESS :: 1
-	COLOR :: k2.Color { 88, 88, 88, 255 }
-	cell_size := f32(16)
-
-	lines_y := camera_bounds.height / cell_size
-	start_y := f32(int(camera_bounds.min_y) / int(cell_size)) * cell_size
-	if camera_bounds.min_y > 0 do start_y += cell_size
-
-	for y in 0 ..< lines_y {
-		k2.draw_line(
-			{camera_bounds.min_x, start_y + cell_size * y},
-			{camera_bounds.max_x, start_y + cell_size * y},
-			GRID_LINE_THICKNESS / camera.zoom,
-			COLOR,
-		)
-	}
-
-	lines_x := camera_bounds.width / cell_size
-	start_x := f32(int(camera_bounds.min_x) / int(cell_size)) * cell_size
-	if camera_bounds.min_x > 0 do start_x += cell_size
-
-	for x in 0 ..< lines_x {
-		k2.draw_line(
-			{start_x + cell_size * x, camera_bounds.min_y},
-			{start_x + cell_size * x, camera_bounds.max_y},
-			GRID_LINE_THICKNESS / camera.zoom,
-			COLOR,
-		)
-	}
-}
-
-update_tilemap_grid :: proc(grid: ^TilemapGrid, mouse_world_position: Vec2){
-
-	NONE : u8 : 255
-	REMOVE : u8 : 0
-	ADD : u8 : 1
-
-	action := NONE
-	if k2.mouse_button_is_held(.Left) && !k2.key_is_held(.Left_Control) do action = ADD
-	if k2.mouse_button_is_held(.Right) do action = REMOVE
-
-	if action != NONE {
-		position := mouse_world_position - grid.position
-		if position.x < 0 || position.y < 0 do return
-
-		cell_position := position / grid.cell_size
-		x := int(cell_position.x)
-		y := int(cell_position.y)
-
-		if x >= grid.width || y >= grid.height do return
-
-		grid.data[grid.width * y + x] = action
-	}
-}
-
-render_grid :: proc(grid: ^TilemapGrid) {
-	/*
-	for y in 0..<grid.height {
-		for x in 0..<grid.width {
-			index := grid.width * y + x
-			if grid.data[index] != 0 {
-				k2.draw_rect_vec(grid.position + {f32(x), f32(y)} * grid.cell_size, grid.cell_size, k2.YELLOW)
-			}
-		}
-	}
-	*/
-
-	size := grid.cell_size * {f32(grid.width), f32(grid.height)}
-	k2.draw_rect_outline({grid.position.x, grid.position.y, size.x, size.y}, 2, k2.YELLOW)
-	//k2.draw_rect_outline_vec(grid.position, grid.cell_size * {f32(grid.width), f32(grid.height)}, 2, k2.YELLOW)
-}
-
-render_grid_selection :: proc(grid: ^TilemapGrid, mouse_world_position: Vec2) {
-	
-	position := mouse_world_position - grid.position
-	if position.x < 0 || position.y < 0 do return
-
-	cell_position := position / grid.cell_size
-	x := int(cell_position.x)
-	y := int(cell_position.y)
-
-	if x >= grid.width || y >= grid.height do return
-
-	k2.draw_rect_vec(grid.position + grid.cell_size * Vec2{f32(x), f32(y)}, grid.cell_size, k2.Color{0, 0, 0, 128})
-}
-
-render_dual_grid :: proc(grid: ^TilemapGrid, texture: k2.Texture, row: int) {
-
-	rect := k2.Rect{0, f32(row) * grid.cell_size.y, grid.cell_size.x, grid.cell_size.y}
-	
-	for y in 0..<(grid.height - 1) {
-		for x in 0..<(grid.width - 1) {
-			
-			texture_index := grid.data[grid.width * y + x] != 0 ? 1 : 0
-			texture_index <<= 1
-			texture_index += grid.data[grid.width * y + x + 1] != 0 ? 1 : 0
-			texture_index <<= 1
-			texture_index += grid.data[grid.width * (y + 1) + x] != 0 ? 1 : 0
-			texture_index <<= 1
-			texture_index += grid.data[grid.width * (y + 1) + x + 1] != 0 ? 1 : 0
-
-			rect.x = f32(texture_index) * grid.cell_size.x
-
-			k2.draw_texture_rect(texture, rect, grid.position + {f32(x), f32(y)} * grid.cell_size + grid.cell_size / 2)
-		}
-	}
-}
-
-TextureOption :: struct {
-	index: int,
-	text: string
-}
-
-texture_options := []TextureOption {
-	{0, "Basic"},
-	{1, "Rounded"},
-	{2, "3D"},
-	{3, "3DWithGrid"},
-	{4, "Bevel"},
-}
-
-texture_option_index := 0
-
-increment_texture_option :: proc(){
-	texture_option_index += 1
-	if texture_option_index >= len(texture_options) {
-		texture_option_index = 0
-	}
 }

@@ -131,6 +131,9 @@ get_screen_width :: proc() -> int
 // Gets the height of the drawing area within the window.
 get_screen_height :: proc() -> int
 
+// Gets the screen width and height as a 2D vector.
+get_screen_size :: proc() -> Vec2
+
 // Moves the window.
 //
 // This does nothing for web builds.
@@ -226,8 +229,6 @@ get_mouse_wheel_delta :: proc() -> f32
 // Returns the mouse position, measured from the top-left corner of the window.
 get_mouse_position :: proc() -> Vec2
 
-get_mouse_pos :: get_mouse_position
-
 // Returns how many pixels the mouse moved between the previous and the current frame.
 get_mouse_delta :: proc() -> Vec2
 
@@ -263,19 +264,28 @@ set_gamepad_vibration :: proc(gamepad: Gamepad_Index, left: f32, right: f32)
 
 // Draw a colored rectangle. The rectangles have their (x, y) position in the top-left corner of the
 // rectangle.
-draw_rect :: proc(r: Rect, c: Color)
-
-// Creates a rectangle from a position and a size and draws it.
-draw_rect_vec :: proc(pos: Vec2, size: Vec2, c: Color)
-
-// Draw a rectangle with a custom origin and rotation.
 //
-// The origin says which point the rotation rotates around. If the origin is `(0, 0)`, then the
-// rectangle rotates around the top-left corner of the rectangle. If it is `(rect.w/2, rect.h/2)`
-// then the rectangle rotates around its center.
+// Optional parameters:
+// - origin: The point to rotate around, also offsets the position of the rect. If the origin is
+//   `(0, 0)`, then the rectangle rotates around the top-left corner of the rectangle. If it is
+//   `(rect.w/2, rect.h/2)` then the rectangle rotates around its center.
+// - rotation: The rotation to apply, in radians
+draw_rect :: proc(rect: Rect, color: Color, origin: Vec2 = {}, rotation: f32 = 0)
+
+// Creates a rectangle from a position and a size and draws it using the specified color.
 //
-// Rotation unit: Radians.
-draw_rect_ex :: proc(r: Rect, origin: Vec2, rot: f32, c: Color)
+// Optional parameters:
+// - origin: The point to rotate around, also offsets the position of the rect. If the origin is
+//   `(0, 0)`, then the rectangle rotates around the top-left corner of the rectangle. If it is
+//   `(rect.w/2, rect.h/2)` then the rectangle rotates around its center.
+// - rotation: The rotation to apply, in radians
+draw_rect_vec :: proc(
+	position: Vec2,
+	size: Vec2,
+	color: Color,
+	origin: Vec2 = {},
+	rotation: f32 = 0
+)
 
 // Draw the outline of a rectangle with a specific thickness. The outline is drawn using four
 // rectangles.
@@ -291,41 +301,82 @@ draw_circle_outline :: proc(center: Vec2, radius: f32, thickness: f32, color: Co
 // Draws a line from `start` to `end` of a certain thickness.
 draw_line :: proc(start: Vec2, end: Vec2, thickness: f32, color: Color)
 
-// Draw a texture at a specific position. The texture will be drawn with its top-left corner at
-// position `pos`.
+// Draws a triangle using three vertices. The order of the vertices does not matter: Clockwise and
+// counter-clockwise triangles will give the same result.
+draw_triangle :: proc(vertices: [3]Vec2, c: Color)
+
+// Draw a texture at a position. The top-left corner of the texture will end up at the position.
 //
-// Load textures using `load_texture_from_file` or `load_texture_from_bytes`.
-draw_texture :: proc(tex: Texture, pos: Vec2, tint := WHITE)
-
-// Draw a section of a texture at a specific position. `rect` is a rectangle measured in pixels. It
-// tells the procedure which part of the texture to display. The texture will be drawn with its
-// top-left corner at position `pos`.
-draw_texture_rect :: proc(tex: Texture, rect: Rect, pos: Vec2, tint := WHITE)
-
-// Draw a texture by taking a section of the texture specified by `src` and draw it into the area of
-// the screen specified by `dst`. You can also rotate the texture around an origin point of your
-// choice.
+// Optional parameters:
+// - origin: An offset for the position, and also the point to rotate around.
+// - rotation: Measured in radians. Rotates around the top-left corner, plus any `origin` shift.
+// - tint: A color to apply to the texture, in a multiplicative way. WHITE means no tinting.
 //
-// Tip: Use `k2.get_texture_rect(tex)` for `src` if you want to draw the whole texture.
+// If you want to rotate around the middle of the texture, then try this:
+// 
+//// middle := k2.rect_middle(k2.get_texture_rect(tex))
+//// draw_texture(tex, pos + middle, middle, rot)
+draw_texture :: proc(
+	texture: Texture,
+	position: Vec2,
+	origin: Vec2 = {},
+	rotation: f32 = 0,
+	tint := WHITE,
+)
+
+// Draw a section of a texture at a position. The section is chosen using the `source` parameter,
+// which is a rectangle that uses pixel coordinates.
 //
-// Rotation unit: Radians.
-draw_texture_ex :: proc(tex: Texture, src: Rect, dst: Rect, origin: Vec2, rotation: f32, tint := WHITE)
+// Optional parameters:
+// - origin: An offset for the position, and also the point to rotate around.
+// - rotation: Measured in radians. Rotates around the top-left corner, plus any `origin` shift.
+// - tint: A color to apply to the texture, in a multiplicative way. WHITE means no tinting.
+draw_texture_section :: proc(
+	texture: Texture,
+	source: Rect,
+	position: Vec2,
+	origin: Vec2 = {},
+	rotation: f32 = 0,
+	tint := WHITE,
+)
 
-// Tells you how much space some text of a certain size will use on the screen. The font used is the
-// default font. The return value contains the width and height of the text.
-measure_text :: proc(text: string, font_size: f32) -> Vec2
+// Draw a section of a texture by fitting it into a rectangle. The section is chosen using the
+// rectangle parameter `source`, measured in pixels. The `dest` parameter is the rectangle on the
+// screen (or in the world) that we want to fit the texture section into.
+//
+// Optional parameters:
+// - origin: An offset for the dest rectangle, and also the point to rotate around.
+// - rotation: Measured in radians. Rotates around the top-left corner, plus any `origin` shift.
+// - tint: A color to apply to the texture, in a multiplicative way. WHITE means no tinting.
+draw_texture_fit :: proc(
+	texture: Texture,
+	source: Rect,
+	dest: Rect,
+	origin: Vec2 = {},
+	rotation: f32 = 0,
+	tint := WHITE,
+)
 
-// Tells you how much space some text of a certain size will use on the screen, using a custom font.
-// The return value contains the width and height of the text.
-measure_text_ex :: proc(font_handle: Font, text: string, font_size: f32) -> Vec2
+// Measures how much space some text of a certain size will use on the screen. Will use the default
+// font unless you specify a custom font.
+measure_text :: proc(text: string, font_size: f32, font: Font = FONT_DEFAULT) -> Vec2
 
-// Draw text at a position with a size. This uses the default font. `pos` will be equal to the 
-// top-left position of the text.
-draw_text :: proc(text: string, pos: Vec2, font_size: f32, color := BLACK)
-
-// Draw text at a position with a size, using a custom font. `pos` will be equal to the  top-left
-// position of the text.
-draw_text_ex :: proc(font_handle: Font, text: string, pos: Vec2, font_size: f32, color := BLACK)
+// Draw text at a position, with a size and color. The position is the top-left position of the
+// text.
+//
+// Optional parameters:
+// - font: The font to use, uses a default font if none is specified.
+// - origin: The origin relative top the top-left position of the text. Used when rotating the text.
+// - rotation: Rotating to apply to the text, measured in radians.
+draw_text :: proc(
+	text: string,
+	position: Vec2,
+	font_size: f32,
+	color: Color,
+	font := FONT_DEFAULT,
+	origin: Vec2 = {},
+	rotation: f32 = 0,
+)
 
 //--------------------//
 // TEXTURE MANAGEMENT //
@@ -383,61 +434,209 @@ set_texture_filter_ex :: proc(
 // AUDIO //
 //-------//
 
-// Play a sound previous created using `load_sound_from_file` or `load_sound_from_bytes` or
-// `create_sound_instance`. The sound will be mixed when `update_audio_mixer` runs, which
-// happens as part of `update`.
-play_sound :: proc(snd: Sound, loop := false)
+// Play a sound previous created using `load_sound_from_xxx` or `create_sound_from_audio_buffer`.
+// The sound will be mixed when `update_audio_mixer` runs, which happens as part of `update`.
+play_sound :: proc(sound: Sound)
+
+// Stop a sound. Rewinds it to the start.
+stop_sound :: proc(sound: Sound)
+
+// Returns true if the sound is currently playing.
+sound_is_playing :: proc(sound: Sound) -> bool
 
 // Set the volume of a sound. Range: 0 to 1, where 0 is silence and 1 is the original volume of the
 // sound. The volume change will only affect this instance of the sound. Use `create_sound_instance`
 // to create more instances without duplicating data.
-set_sound_volume :: proc(snd: Sound, volume: f32)
+set_sound_volume :: proc(sound: Sound, volume: f32)
 
 // Set the pan of a sound. Range: -1 to 1, where -1 is full left, 0 is center and 1 is full right.
 // The pan change will only affect this instance of the sound. Use `create_sound_instance` to create
 // more instances without duplicating data.
-set_sound_pan :: proc(snd: Sound, pan: f32)
+set_sound_pan :: proc(sound: Sound, pan: f32)
 
 // Set the pitch of a sound. Range: 0.01 to infinity, where 0.01 is the lowest pitch and higher
 // values increase the pitch. The pitch change will only affect this instance of the sound. Use
 // `create_sound_instance` to create more instances without duplicating data.
-set_sound_pitch :: proc(snd: Sound, pitch: f32)
+set_sound_pitch :: proc(sound: Sound, pitch: f32)
 
-// Load a WAV file from disk. Returns a `Sound` which can be used with `play_sound`. Use 
-// `create_sound_instance` to create more instances of the same sound without duplicating data.
+// Makes a sound loop when it reaches the end. You can set this before playing but also while
+// playing the sound.
+set_sound_loop :: proc(sound: Sound, loop: bool)
+
+// Load a WAV file from disk. Returns a `Sound` which can be used with `play_sound`. If you need to
+// play a sound multiple times simultaneously, then use `load_audio_buffer_from_file` followed by
+// one or more calls to `create_sound_from_audio_buffer`.
+//
+// Sounds created using this procedure owns their internal audio buffer: Calling `destroy_sound`
+// will also destroy the audio buffer. 
 //
 // Currently only supports 16 bit WAV files.
 load_sound_from_file :: proc(filename: string) -> Sound
 
 // Load a sound some pre-loaded memory (for example using `#load("sound.wav")`). Returns a `Sound`
-// which can be used with `play_sound`. Use `create_sound_instance` to create more instances of the
-// same sound without duplicating data.
+// which can be used with `play_sound`. If you need to play a sound multiple times simultaneously,
+// then use `load_audio_buffer_from_bytes` followed by one or more calls to
+// `create_sound_from_audio_buffer`.
+//
+// Sounds created using this procedure owns their internal audio buffer: Calling `destroy_sound`
+// will also destroy the audio buffer.
 //
 // Currently only supports 16 bit WAV data. Note that the data should be the entire WAV file,
 // including the header. If your data does not include the header, then please use
-// `load_sound_from_bytes_raw` instead.
+// `load_audio_buffer_from_bytes_raw` combined with `create_sound_from_audio_buffer`.
 load_sound_from_bytes :: proc(bytes: []byte) -> Sound
 
 // Load a sound from some raw audio data. You need to specify the data, format and sample rate of
-// the sound yourself. This assumes that there is no header in the data. If your data has a header
-// (you read the data from a file on disk), then please use `load_sound_from_bytes` instead.
-load_sound_from_bytes_raw :: proc(bytes: []u8, format: Raw_Sound_Format, sample_rate: int) -> Sound
+// the audio data yourself. This assumes that there is no header in the data. If your data has a
+// header (you read the data from a file on disk), then please use `load_sound_from_bytes` instead.
+//
+// The returned Sound owns its internal Audio_Buffer: Calling `destroy_sound` with it will destroy
+// the audio buffer.
+load_sound_from_bytes_raw :: proc(
+	bytes: []u8,
+	format: Raw_Sound_Format,
+	sample_rate: int,
+	channels: Audio_Channels,
+) -> Sound
 
-// Makes a new sound that uses the same data as the original sound, but you can have different
-// settings such as volume, pan and pitch. This makes it possible to play the same sound multiple
-// times at once with different settings. The data is destroyed when all the instances (including
-// the original instance) are destroyed.
-create_sound_instance :: proc(snd: Sound) -> Sound
+// Load a WAV file from disk. Returns an `Audio_Buffer` which can be used with
+// `create_sound_from_audio_buffer` in order to play the audio buffer multiple times simultaneously.
+//
+// Currently only supports 16 bit WAV data.
+load_audio_buffer_from_file :: proc(filename: string) -> Audio_Buffer
 
-// Destroy a sound instance. If this is the last instance that uses the same data, then the data
-// will also be destroyed.
-destroy_sound :: proc(snd: Sound)
+// Load a WAV file from some pre-loaded memory (can be loaded using `#load("sound.wav")`). Returns
+// an `Audio_Buffer` which can be used with `create_sound_from_audio_buffer` in order to play the
+// audio buffer multiple times simultaneously.
+//
+// Currently only supports 16 bit WAV data. Note that the data should be the entire WAV file,
+// including the header. If your data does not include the header, then please use
+// `load_audio_buffer_from_bytes_raw`.
+load_audio_buffer_from_bytes :: proc(bytes: []u8) -> Audio_Buffer
+
+// Load an audio buffer from some raw audio data. You need to specify the data, format and sample
+// rate of the sound yourself. This assumes that there is no header in the data. If your data has a
+// header (you read the data from a file on disk), then please use `load_audio_buffer_from_bytes`
+// instead.
+load_audio_buffer_from_bytes_raw :: proc(
+	bytes: []u8,
+	format: Raw_Sound_Format,
+	sample_rate: int,
+	channels: Audio_Channels,
+) -> Audio_Buffer
+
+// Creates a sound that can be used to play the contents of an `Audio_Buffer`. This can be used to
+// load an audio buffer once and have multiple sounds playing the contents of it, simultaneously.
+// This makes all those sounds share the same audio data.
+//
+// Sounds created using this procedure do not own the buffer. This means that calling
+// `destroy_sound` on the Sound will only remove the Sound from Karl2D's internal state, but it
+// won't destroy the Audio_Buffer. Such auto-destroying of the `Audio_Buffer` only happen with
+// sounds created using `load_sound_from_file` and `load_sound_from_bytes`.
+create_sound_from_audio_buffer :: proc(buffer: Audio_Buffer) -> Sound
+
+// Destroy a sound, removing it from Karl2D's internal list of sounds.
+//
+// If the sound was created using `create_sound_from_audio_buffer`, then this procedure will not
+// destroy the audio buffer. If the sound was created using `load_sound_from_file` or
+// `load_sound_from_bytes`, then this procedure WILL destroy the audio buffer.
+destroy_sound :: proc(sound: Sound)
+
+// Destroy an audio buffer previously loaded using `load_audio_buffer_from_xxx`. Before destroying
+// this audio buffer, make sure it is not in use by any playing sounds. Destroy the sounds that
+// reference it using `destroy_sound` first.
+destroy_audio_buffer :: proc(audio_buffer: Audio_Buffer)
+
+// Load an audio stream from a file on disk. This is often used for playing music. An audio stream
+// only loads a small part of the file at a time. As the file is played, new parts are streamed into
+// memory.
+//
+// Supported file formats: ogg
+//
+// Audio streams do not stream in data automatically from the disk. You need to call
+// `update_audio_stream` every frame to stream in the new data.
+load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream
+
+// Load an audio stream from a byte slice that is completely in memory. This makes it possible to
+// have an encoded audio file in memory and decode it, a small bit a time.
+//
+// The `bytes` parameter is NOT copied. Do not deallocate that memory while the stream is playing.
+//
+// Supported formats: ogg
+//
+// Audio streams do not stream in data automatically from the source. You need to call
+// `update_audio_stream` every frame to stream in the new data.
+//
+// This procedure is useful in some specific cases. One such case is web builds. Web builds don't
+// support `load_audio_stream_from_file` since they don't have a file system. Instead, you can do
+// `k2.load_audio_stream_from_bytes(#load("some_music.ogg"))` to embed the whole ogg file in the
+// `.wasm` file.
+//
+// Another use case is if you're making a desktop game and you want to embed all the assets in the
+// executable (so the game is a single file). In that case you'd could also use `#load` to fetch the
+// file and then send it into this procedure.
+//
+// Note that this procedure wants the encoded file, for example an ogg file just like it was on
+// disk. For normal sounds there is a `load_sound_from_bytes_raw` procedure where you just send in
+// the samples. There is no such procedure for audio streams since the whole idea is to stream an
+// encoded file into memory without having to decode the whole thing first.  
+load_audio_stream_from_bytes :: proc(bytes: []u8) -> Audio_Stream
+
+// Destroy an audio stream previously loaded using `load_audio_stream_from_file` or
+// `load_audio_stream_from_bytes`. This cleans up some internal state and closes file handles.
+//
+// If you created the stream using `load_audio_stream_from_bytes`, then this procedure will NOT
+// deallocate the bytes that you sent into that procedure.
+destroy_audio_stream :: proc(stream: Audio_Stream)
+
+// Streams in new audio data from the audio stream. You need to call this once per frame in order
+// for the streaming to actually happen. 
+update_audio_stream :: proc(stream: Audio_Stream)
+
+// Start playing an audio stream. Don't forget to call `update_audio_stream` every frame in order to
+// stream in new data.
+//
+// Running this this while the stream is already playing will restart it from the beginning. Use
+// `pause_audio_stream` if you just want to pause it.
+play_audio_stream :: proc(stream: Audio_Stream)
+
+// Pause an audio stream. Run `play_audio_stream` to unpause it.
+pause_audio_stream :: proc(stream: Audio_Stream)
+
+// Stop an audio stream. If `play_audio_stream` is called again, the stream will start over from the
+// beginning.
+stop_audio_stream :: proc(stream: Audio_Stream)
+
+// Set the volume of the audio stream. Range: 0 to 1.
+//
+// You can use this both with a playing and non-playing stream. If its already playing, then this
+// will affect the playing stream.
+set_audio_stream_volume :: proc(stream: Audio_Stream, volume: f32)
+
+// Set the pan (balance between left and right) of the audio stream. Range: -1 to 1, where -1 is
+// full left, 0 is center and 1 is full right.
+//
+// You can use this both with a playing and non-playing stream. If its already playing, then this
+// will affect the playing stream.
+set_audio_stream_pan :: proc(stream: Audio_Stream, pan: f32)
+
+// Set the pitch of the audio stream. Range: 0.01 to infinity. A higher value will make the audio
+// play faster.
+//
+// You can use this both with a playing and non-playing stream. If its already playing, then this
+// will affect the playing stream.
+set_audio_stream_pitch :: proc(stream: Audio_Stream, pitch: f32)
+
+// Set the audio stream to loop when it reaches the end of the stream. You can set this before
+// playing the stream. You can also modify the loop state of an already playing stream.
+set_audio_stream_loop :: proc(stream: Audio_Stream, loop: bool)
 
 // Update the audio mixer and feed more audio data into the audio backend. This is done
 // automatically when `update` runs, so you normally don't need to call this manually.
 //
-// This procedure implements a custom software audio mixer. The backend is just fed the resulting
-// mix. Therefore, you can see everything regarding how audio is processed in this procedure.
+// This procedure implements a custom software audio mixer. The audio backend is just fed the
+// resulting mix. Therefore, you can see everything regarding how audio is processed in this
+// procedure.
 //
 // Will only run if the audio backend is running low on audio data.
 update_audio_mixer :: proc()
@@ -479,6 +678,9 @@ rect_middle :: proc(r: Rect) -> Vec2
 
 rect_center :: rect_middle
 rect_centre :: rect_middle
+
+// Combine a position and a size into a rectangle.
+rect_from_pos_size :: proc(pos: Vec2, size: Vec2) -> Rect
 
 // Get the top left corner of a rectangle.
 rect_top_left :: proc(r: Rect) -> Vec2
@@ -533,16 +735,13 @@ rotate :: proc(v: Vec2, angle_radians: f32) -> Vec2
 //-------//
 
 // Loads a font from disk and returns a handle that represents it.
-load_font_from_file :: proc(filename: string) -> Font
+load_font_from_file :: proc(filename: string, options: Font_Options = {}) -> Font
 
 // Loads a font from a block of memory and returns a handle that represents it.
-load_font_from_bytes :: proc(data: []u8) -> Font
+load_font_from_bytes :: proc(data: []u8, options: Font_Options = {}) -> Font
 
 // Destroy a font previously loaded using `load_font_from_file` or `load_font_from_bytes`.
 destroy_font :: proc(font: Font)
-
-// Returns the built-in font of Karl2D (the font is known as "roboto")
-get_default_font :: proc() -> Font
 
 //---------//
 // SHADERS //
@@ -635,8 +834,6 @@ camera_view_matrix :: proc(c: Camera) -> Mat4
 // Calculate the matrix that brings something in front of the camera.
 camera_world_matrix :: proc(c: Camera) -> Mat4
 
-get_fullscreen_rect :: proc() -> Rect
-
 //------//
 // MISC //
 //------//
@@ -652,6 +849,40 @@ set_scissor_rect :: proc(scissor_rect: Maybe(Rect))
 // Restore the internal state using the pointer returned by `init`. Useful after reloading the
 // library (for example, when doing code hot reload).
 set_internal_state :: proc(state: ^State)
+
+Open_URL_Error :: enum {
+	None,
+
+	// The URL does not start with https://, http:// or file:///, or contains a space
+	Invalid_URL,
+
+	// Platform-specific failure: Perhaps the OS-specific utility that opens URLs failed.
+	Failed_To_Open,
+}
+
+// Open a URL in the default web browser, if possible.
+//
+// Requirements:
+// - The URL must start with https://, http:// or file:///
+// - The URL may not contain spaces
+//
+// Returns Open_URL_Error.None if the call was succesful.
+open_url :: proc(url: string) -> Open_URL_Error
+
+//--------------//
+// EXPERIMENTAL //
+//--------------//
+//
+// These procedures are experimental and may not stay.
+
+// The witdth a button drawn using `ui_button` will have
+ui_button_width :: proc(text: string, button_height: f32) -> f32
+
+// Experimental UI button. Returns true if the button was pressed. Currently only works properly
+// when no camera is set.
+//
+// Mainly used by the samples in order to create the "Source" button.
+ui_button :: proc(r: Rect, text: string) -> bool
 
 //---------------------//
 // TYPES AND CONSTANTS //
@@ -677,7 +908,8 @@ Color :: [4]u8
 BLACK        :: Color { 0, 0, 0, 255 }
 WHITE        :: Color { 255, 255, 255, 255 }
 BLANK        :: Color { 0, 0, 0, 0 }
-GRAY         :: Color { 183, 183, 183, 255 }
+LIGHT_GRAY   :: Color { 183, 183, 183, 255 }
+GRAY         :: Color { 100, 100, 100, 255}
 DARK_GRAY    :: Color { 66, 66, 66, 255}
 BLUE         :: Color { 25, 198, 236, 255 }
 DARK_BLUE    :: Color { 7, 47, 88, 255 }
@@ -895,8 +1127,18 @@ Pixel_Format :: enum {
 	R_8_UInt,
 }
 
+Font_Options :: struct {
+	// When the font is loaded, the alpha value of each pixel will be multiplied into its RGB values.
+	// This is useful if you want to use `set_blend_mode(.Premultiplied_Alpha)` when drawing text.
+	premultiply_alpha: bool,
+
+	// Passed on to font atlas creation.
+	filter: Texture_Filter,
+}
+
 Font_Data :: struct {
 	atlas: Texture,
+	options: Font_Options,
 
 	// internal
 	fontstash_handle: int,
@@ -906,45 +1148,157 @@ Handle :: hm.Handle64
 Texture_Handle :: distinct Handle
 Render_Target_Handle :: distinct Handle
 Font :: distinct int
+DEFAULT_FONT_DATA :: #load("default_fonts/roboto.ttf")
 
-FONT_NONE :: Font {}
+FONT_NONE :: Font(0)
+
+// The default font. It's a font called "roboto". It is loaded from `DEFAULT_FONT_DATA` on Karl2D is
+// initialized.
+FONT_DEFAULT :: Font(1)
+
 TEXTURE_NONE :: Texture_Handle {}
 RENDER_TARGET_NONE :: Render_Target_Handle {}
 
 AUDIO_MIX_SAMPLE_RATE :: 44100
 AUDIO_MIX_CHUNK_SIZE :: 1400
 
-Audio_Sample :: [2]f32
+// Single channel audio sample. Can have a value between -1 and 1. For stereo sound every other
+// sample in an array of samples will be interpreted as left and right respectively.
+Audio_Sample :: f32
 
+// Represents a sound you can play using the `play_sound` procedure. Loaded using
+// `load_sound_from_file` or `load_sound_from_bytes`. Create instances of an already loaded sound
+// using `create_sound_instance`.
 Sound :: distinct Handle
 
 SOUND_NONE :: Sound {}
 
-Sound_Data_Handle :: distinct Handle
+// A sound instance is what `Sound` handles are mapped to. They contain a handle to a an audio
+// buffer, and the settings for use when playing that buffer. The audio buffer may be shared between
+// multiple sound instances, which allows you to play the same sound multiple times at the same time
+// without having to clone the data.
+Sound_Object :: struct {
+	handle: Sound,
 
-Sound_Data :: struct {
-	handle: Sound_Data_Handle,
+	// The audio buffer may be used by multiple sound instances. This is the key idea of sound
+	// instances: That you can use `create_sound_instance` to make it possible to play a sound
+	// multiple times at the same time, without having to clone the data.
+	audio_buffer: Audio_Buffer,
+
+	// If true, then the audio buffer will be destroyed when this sound is destroyed. This is true
+	// when the sound was loaded using the `load_sound_xxx` procedures. It's false when the sound
+	// is created from `create_sound_from_audio_buffer`.
+	owns_audio_buffer: bool,
+
+	// If this sound is currently playing, then this identifies the state of the playing sound. It
+	// is PLAYING_AUDIO_BUFFER_NONE (zero) when it is not playing.
+	playing_buffer_handle: Playing_Audio_Buffer_Handle,
+
+	// This exists both here and in the `Playing_Audio_Buffer`. That way we can store settings
+	// even when the sound isn't playing. Set using `set_sound_volume/pan/pitch`.
+	playback_settings: Audio_Buffer_Playback_Settings,
+
+	// If true, then the playing sound will be set up as "looping" when `play_sound` is called. Set
+	// using `set_sound_loop`.
+	loop: bool,
+}
+
+Audio_Stream :: distinct Handle
+
+AUDIO_STREAM_NONE :: Audio_Stream {}
+
+AUDIO_STREAM_BUFFER_SIZE :: 3 * AUDIO_MIX_SAMPLE_RATE
+
+Audio_Channels :: enum {
+	Mono,
+	Stereo,
+}
+
+Audio_Stream_Mode :: enum {
+	From_File,
+	From_Bytes,
+}
+
+Audio_Stream_Data :: struct {
+	handle: Audio_Stream,
+	
+	vorbis: ^stbv.vorbis,
+	playing_buffer_handle: Playing_Audio_Buffer_Handle,
+	buffer: Audio_Buffer,
+	
+	// Where in the audio buffer referred to by `buffer_handle` that we have most recently written
+	// samples. Together with the `offset` of the Playing_Audio_Buffer, this forms a circular
+	// buffer.
+	buffer_write_pos: int,
+
+	playback_settings: Audio_Buffer_Playback_Settings,
+
+	// Different from `loop` in `Playing_Audio_Buffer`. This says if the whole stream should loop
+	// when it reaches end-of-file. The `loop` in `Playing_Audio_Buffer` just says to loop the
+	// buffer itself. That's something you always want for a stream: We are continously writing
+	// data from a file into a small buffer that is a few seconds long.
+	loop: bool,
+
+	mode: Audio_Stream_Mode,
+
+	// use if mode = .From_File
+	file: ^File,
+	file_read_buf: [dynamic]u8,
+	file_read_buf_offset: int,
+
+	// use if mode == .From_Bytes
+	bytes: []u8,
+}
+
+// The format used to describe that data passed to `load_sound_from_bytes_raw`.
+Raw_Sound_Format :: enum {
+	Integer8,
+	Integer16,
+	Integer32,
+	Float,
+}
+
+Audio_Buffer :: distinct Handle
+
+AUDIO_BUFFER_NONE :: Audio_Buffer{}
+
+Audio_Buffer_Object :: struct {
+	handle: Audio_Buffer,
+
+	// All the samples of the audio buffer. In the case of stereo, the left and right samples are
+	// interleaved.
 	samples: []Audio_Sample,
+
+	// The number of samples per second. Note that the mixer uses 44100 samples per second (as
+	// defined by AUDIO_MIX_SAMPLE_RATE). When the sample rate of the buffer and the mixer do no
+	// match, then interpolation will happen during mixing.
 	sample_rate: int,
 
-	// When a Sound_Instance is destroyed, we check if this reaches zero. If it does, then the
-	// Sound_Data and its samples slice are also destroyed/freed.
-	instances: int,
+	// If this is Stereo, then the left and right samples are interleaved in `samples`.
+	channels: Audio_Channels,
 }
 
-Sound_Instance :: struct {
-	handle: Sound,
-	sound_data_handle: Sound_Data_Handle,
+Audio_Buffer_Playback_Settings :: struct {
 	volume: f32,
-	target_volume: f32,
 	pan: f32,
-	target_pan: f32,
 	pitch: f32,
-	target_pitch: f32,
 }
 
-Playing_Sound :: struct {
-	sound: Sound,
+DEFAULT_AUDIO_BUFFER_PLAYBACK_SETTINGS :: Audio_Buffer_Playback_Settings {
+	volume = 1,
+	pan = 0,
+	pitch = 1,
+}
+
+PLAYING_AUDIO_BUFFER_NONE :: Playing_Audio_Buffer_Handle {}
+
+Playing_Audio_Buffer_Handle :: distinct Handle
+
+Playing_Audio_Buffer :: struct {
+	handle: Playing_Audio_Buffer_Handle,
+	audio_buffer: Audio_Buffer,
+	target_settings: Audio_Buffer_Playback_Settings,
+	current_settings: Audio_Buffer_Playback_Settings,
 
 	// How many samples have played?
 	offset: int,
@@ -955,14 +1309,6 @@ Playing_Sound :: struct {
 	offset_fraction: f32,
 
 	loop: bool,
-}
-
-// The format used to describe that data passed to `load_sound_from_bytes_raw`.
-Raw_Sound_Format :: enum {
-	Integer8,
-	Integer16,
-	Integer32,
-	Float,
 }
 
 // This keeps track of the internal state of the library. Usually, you do not need to poke at it.
@@ -1000,7 +1346,7 @@ State :: struct {
 	gamepad_button_went_up: [MAX_GAMEPADS]#sparse [Gamepad_Button]bool,
 	gamepad_button_is_held: [MAX_GAMEPADS]#sparse [Gamepad_Button]bool,
 
-	default_font: Font,
+	// Also see FONT_NONE and FONT_DEFAULT
 	fonts: [dynamic]Font_Data,
 	shape_drawing_texture: Texture_Handle,
 	batch_font: Font,
@@ -1032,14 +1378,17 @@ State :: struct {
 	audio_backend: Audio_Backend_Interface,
 	audio_backend_state: rawptr,
 
-	sound_data: hm.Dynamic_Handle_Map(Sound_Data, Sound_Data_Handle),
-	sound_instances: hm.Dynamic_Handle_Map(Sound_Instance, Sound),
+	audio_buffers: hm.Dynamic_Handle_Map(Audio_Buffer_Object, Audio_Buffer),
+	sounds: hm.Dynamic_Handle_Map(Sound_Object, Sound),
 
-	// Sounds that have been started as because `play_sound` was called.
-	playing_sounds: [dynamic]Playing_Sound,
+	playing_audio_buffers: hm.Dynamic_Handle_Map(Playing_Audio_Buffer, Playing_Audio_Buffer_Handle),
 
-	// 1 megabyte is arbitrarily chosen.
-	mix_buffer: [1*mem.Megabyte]Audio_Sample,
+	audio_streams: hm.Dynamic_Handle_Map(Audio_Stream_Data, Audio_Stream),
+	vorbis_alloc: stbv.vorbis_alloc,
+
+	// Mixer will never mix in more than 1.5 * AUDIO_MIX_CHUNK_SIZE. So 10 times the chunk size is
+	// ample.
+	mix_buffer: [AUDIO_MIX_CHUNK_SIZE*10][2]Audio_Sample,
 
 	// Where the mixer currently is in the mix buffer.
 	mix_buffer_offset: int,

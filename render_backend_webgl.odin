@@ -125,6 +125,10 @@ webgl_init :: proc(state: rawptr, glue: Window_Render_Glue, swapchain_width, swa
 	s.height = swapchain_height
 	s.allocator = allocator
 
+	hm.dynamic_init(&s.shaders, allocator)
+	hm.dynamic_init(&s.textures, allocator)
+	hm.dynamic_init(&s.render_targets, allocator)
+
 	context_ok := gl.CreateCurrentContextById(s.canvas_id, gl.DEFAULT_CONTEXT_ATTRIBUTES)
 	log.ensuref(context_ok, "Could not create context for canvas ID %s", s.canvas_id)
 	set_context_ok := gl.SetCurrentContextById(s.canvas_id)
@@ -134,6 +138,7 @@ webgl_init :: proc(state: rawptr, glue: Window_Render_Glue, swapchain_width, swa
 
 	gl.BindBuffer(gl.ARRAY_BUFFER, s.vertex_buffer_gpu)
 	gl.BufferData(gl.ARRAY_BUFFER, VERTEX_BUFFER_MAX, nil, gl.STREAM_DRAW)
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 
 	gl.Enable(gl.BLEND)
 
@@ -272,6 +277,7 @@ webgl_draw :: proc(
 
 	gl.BindBuffer(gl.ARRAY_BUFFER, s.vertex_buffer_gpu)
 	gl.BufferDataSlice(gl.ARRAY_BUFFER, vertex_buffer, gl.STREAM_DRAW)
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 
 	if len(bound_textures) == len(gl_shd.texture_bindings) {
 		for t, t_idx in bound_textures {
@@ -586,6 +592,8 @@ webgl_load_shader :: proc(vs_source: []byte, fs_source: []byte, desc_allocator :
 		vao = gl.CreateVertexArray(),
 	}
 
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, s.vertex_buffer_gpu)
 	gl.BindVertexArray(gl_shd.vao)
 
 	offset: int
@@ -597,6 +605,8 @@ webgl_load_shader :: proc(vs_source: []byte, fs_source: []byte, desc_allocator :
 		gl.VertexAttribPointer(i32(input.register), num_components, format, norm, stride, uintptr(offset))
 		offset += format_size
 	}
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 
 	constant_descs := make([dynamic]Shader_Constant_Desc, desc_allocator)
 	gl_constants := make([dynamic]WebGL_Shader_Constant, s.allocator)
