@@ -32,7 +32,8 @@ import hm "core:container/handle_map"
 // all dynamically allocated memory.
 //
 // `screen_width` and `screen_height` refer to the resolution of the drawable area of the window.
-// The window might be slightly larger due to borders and headers.
+// The window might be slightly larger due to borders and headers. The true width and height will be
+// scaled up by the scaling setting in the operating system.
 //
 // The return value is a pointer to Karl2D's internal state. You can restore this state later using
 // `set_internal_state()`. This is useful for example when doing game code reload, as the state may
@@ -100,7 +101,14 @@ init :: proc(
 	s.view_matrix = 1
 
 	// Boot up the render backend. It will render into our previously created window.
-	rb.init(s.render_backend_state, window_render_glue, pf.get_screen_width(), pf.get_screen_height(), s.allocator)
+	rb.init(
+		s.render_backend_state,
+		window_render_glue,
+		pf.get_screen_width(),
+		pf.get_screen_height(), 
+		options,
+		s.allocator,
+	)
 
 	// The vertex buffer is created in a render backend-independent way. It is passed to the
 	// render backend each frame as part of `draw_current_batch()`.
@@ -140,14 +148,6 @@ init :: proc(
 		hm.dynamic_init(&s.playing_audio_buffers, s.allocator)
 		hm.dynamic_init(&s.audio_buffers, s.allocator)
 		hm.dynamic_init(&s.sounds, s.allocator)
-
-		VORBIS_STATE_SIZE :: 500 * mem.Kilobyte
-
-		s.vorbis_alloc = {
-			alloc_buffer = make([^]u8, VORBIS_STATE_SIZE, s.allocator),
-			alloc_buffer_length_in_bytes = VORBIS_STATE_SIZE,
-		}
-
 		hm.dynamic_init(&s.audio_streams, s.allocator)
 	}
 
@@ -203,7 +203,6 @@ shutdown :: proc() {
 	// Audio
 	{
 		hm.dynamic_destroy(&s.audio_streams)
-		free(s.vorbis_alloc.alloc_buffer, s.allocator)
 		ab.shutdown()
 		hm.dynamic_destroy(&s.playing_audio_buffers)
 		hm.dynamic_destroy(&s.sounds)
@@ -374,7 +373,7 @@ process_events :: proc() {
 			}
 
 		case Event_Window_Scale_Changed:
-			// Doesn't do anything, only here so people can fetch it via `get_events()`.
+			rb.resize_swapchain(e.screen_width, e.screen_height)
 		}
 	}
 }
@@ -450,6 +449,11 @@ get_window_scale :: proc() -> f32 {
 // Use to change between windowed mode, resizable windowed mode and fullscreen
 set_window_mode :: proc(window_mode: Window_Mode) {
 	pf.set_window_mode(window_mode)
+}
+
+// Hide or show the OS cursor.
+set_cursor_visible :: proc(visible: bool) {
+	pf.set_cursor_visible(visible)
 }
 
 // Flushes the current batch. This sends off everything to the GPU that has been queued in the
@@ -903,14 +907,15 @@ draw_texture :: proc(
 	)
 }
 
-// Draw a section of a texture at a position. The section is chosen using the `source` parameter,
-// which is a rectangle that uses pixel coordinates.
+// Draw a texture at a position, but only draw the region specified by the `source` rectangle. The
+// `source` rectangle is specified in pixel coordinates. You can flip the texture by using negative
+// width/height in `source`.
 //
 // Optional parameters:
 // - origin: An offset for the position, and also the point to rotate around.
 // - rotation: Measured in radians. Rotates around the top-left corner, plus any `origin` shift.
 // - tint: A color to apply to the texture, in a multiplicative way. WHITE means no tinting.
-draw_texture_section :: proc(
+draw_texture_rect :: proc(
 	texture: Texture,
 	source: Rect,
 	position: Vec2,
@@ -933,9 +938,9 @@ draw_texture_section :: proc(
 	)
 }
 
-// Draw a section of a texture by fitting it into a rectangle. The section is chosen using the
-// rectangle parameter `source`, measured in pixels. The `dest` parameter is the rectangle on the
-// screen (or in the world) that we want to fit the texture section into.
+// Draw a texture by selecting a `source` rectangle and fitting it into a `dest` (destination)
+// rectangle. `source` is measured in texture-space pixels and `dest` is measured in world-space
+// pixels. You can flip the texture by using negative width/height for the `source` rectangle.
 //
 // Optional parameters:
 // - origin: An offset for the dest rectangle, and also the point to rotate around.
@@ -975,6 +980,19 @@ draw_texture_fit :: proc(
 	if source.h < 0 {
 		flip_y = true
 		source.h = -source.h
+	}
+
+	// HACK: We ask the render backend if this texture needs flipping. The idea is that GL will
+	// flip render textures, so we need to automatically unflip them.
+	//
+	// Could we do something with the projection matrix while drawing into those render textures
+	// instead? I tried that, but couldn't get it to work.
+	if rb.texture_needs_vertical_flip(texture.handle) {
+		flip_y = !flip_y
+
+		if source.h != f32(texture.height) {
+			source.y = f32(texture.height) - source.h - source.y
+		}
 	}
 
 	if dest.w < 0 {
@@ -1047,15 +1065,6 @@ draw_texture_fit :: proc(
 		uv5.x += us.x
 	}
 
-	// HACK: We ask the render backend if this texture needs flipping. The idea is that GL will
-	// flip render textures, so we need to automatically unflip them.
-	//
-	// Could we do something with the projection matrix while drawing into those render textures
-	// instead? I tried that, but couldn't get it to work.
-	if rb.texture_needs_vertical_flip(texture.handle) {
-		flip_y = !flip_y
-	}
-
 	if flip_y {
 		uv0.y += us.y
 		uv1.y += us.y
@@ -1073,9 +1082,16 @@ draw_texture_fit :: proc(
 	batch_vertex(bl, uv5, c)
 }
 
-@(deprecated="Use draw_texture_section instead")
-draw_texture_rect :: proc(tex: Texture, rect: Rect, pos: Vec2, tint := WHITE) {
-	draw_texture_section(tex, rect, pos, tint = tint)
+@(deprecated="Use draw_texture_rect instead")
+draw_texture_section :: proc(
+	texture: Texture,
+	source: Rect,
+	position: Vec2,
+	origin: Vec2 = {},
+	rotation: f32 = 0,
+	tint := WHITE,
+) {
+	draw_texture_rect(texture, source, position, origin, rotation, tint)
 }
 
 @(deprecated="Use draw_texture_fit instead")
@@ -1151,7 +1167,8 @@ measure_text_ex :: proc(font_handle: Font, text: string, font_size: f32) -> Vec2
 }
 
 // Draw text at a position, with a size and color. The position is the top-left position of the
-// text.
+// text. If you've set a camera using `set_camera`, then the font size will be internally scaled
+// so that the text appear sharp.
 //
 // Optional parameters:
 // - font: The font to use, uses a default font if none is specified.
@@ -1172,20 +1189,31 @@ draw_text :: proc(
 
 	_set_font(font)
 	font_object := &s.fonts[font]
-	fs.SetSize(&s.fs, font_size)
-	iter := fs.TextIterInit(&s.fs, position.x, position.y, text)
+
+	camera_zoom: f32 = 1
+
+	if cam, cam_ok := s.batch_camera.?; cam_ok && cam.zoom > 0.001 {
+		camera_zoom = cam.zoom
+	}
+
+	// Bake the glyph at font_size*camera_zoom pixels so it is sharp at the current zoom level.
+	// We then divide quad positions back by camera_zoom to recover world-space coordinates.
+	render_size := font_size * camera_zoom
+	scaled_pos  := position * camera_zoom
+
+	fs.SetSize(&s.fs, render_size)
+	iter := fs.TextIterInit(&s.fs, scaled_pos.x, scaled_pos.y, text)
 
 	q: fs.Quad
 	for fs.TextIterNext(&s.fs, &iter, &q) {
 		if iter.codepoint == '\n' {
-			iter.nexty += font_size
-			iter.nextx = position.x
+			iter.nexty += render_size
+			iter.nextx = scaled_pos.x
 			continue
 		}
 
 		if iter.codepoint == '\t' {
-			// This is not really correct, but I'll replace it later when I redo the font stuff.
-			iter.nextx += 2*font_size
+			iter.nextx += 2*render_size
 			continue
 		}
 
@@ -1196,18 +1224,23 @@ draw_text :: proc(
 
 		w := f32(FONT_DEFAULT_ATLAS_SIZE)
 		h := f32(FONT_DEFAULT_ATLAS_SIZE)
-
 		src.x *= w
 		src.y *= h
 		src.w *= w
 		src.h *= h
 
+		// Unscale quad positions from atlas-space back to world-space.
+		qx0 := q.x0 / camera_zoom
+		qy0 := q.y0 / camera_zoom
+		qx1 := q.x1 / camera_zoom
+		qy1 := q.y1 / camera_zoom
+		
 		dst := Rect {
 			position.x, position.y,
-			q.x1 - q.x0, q.y1 - q.y0,
+			qx1 - qx0, qy1 - qy0,
 		}
 
-		char_origin := origin + {position.x - q.x0, position.y - q.y0}
+		char_origin := origin + {position.x - qx0, position.y - qy0}
 		draw_texture_fit(font_object.atlas, src, dst, char_origin, rotation, color)
 	}
 }
@@ -1932,6 +1965,11 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 		return AUDIO_STREAM_NONE
 	}
 
+	vorbis_buffer := stbv.vorbis_alloc {
+		alloc_buffer = make([^]u8, VORBIS_STATE_SIZE, s.allocator),
+		alloc_buffer_length_in_bytes = VORBIS_STATE_SIZE,
+	}
+
 	append(&buf, ..read_buf[:nbytes_read])
 	vorbis_res: ^stbv.vorbis
 
@@ -1946,7 +1984,7 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 			i32(len(buf)),
 			&consumed,
 			&vorbis_err,
-			&s.vorbis_alloc,
+			&vorbis_buffer,
 		)
 
 		if vorbis_err == nil {
@@ -1957,6 +1995,7 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 			if seek_err != nil {
 				log.errorf("Failed seeking in audio stream file %v. Error: %v", filename, seek_err)
 				file_close(f)
+				free(vorbis_buffer.alloc_buffer, s.allocator)
 				return AUDIO_STREAM_NONE
 			}
 
@@ -1969,12 +2008,14 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 			if read_err != nil {
 				log.errorf("Failed reading from audio stream file %v. Error: %v", filename, read_err)
 				file_close(f)
+				free(vorbis_buffer.alloc_buffer, s.allocator)
 				return AUDIO_STREAM_NONE
 			}
 
 			if nbytes_read == 0 {
 				log.errorf("Failed to load audio stream. Reached end of file before stream could be loaded.")
 				file_close(f)
+				free(vorbis_buffer.alloc_buffer, s.allocator)
 				return AUDIO_STREAM_NONE
 			}
 
@@ -1982,6 +2023,7 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 		} else {
 			log.errorf("Failed to load audio stream. Error: %v", vorbis_err)
 			file_close(f)
+			free(vorbis_buffer.alloc_buffer, s.allocator)
 			return AUDIO_STREAM_NONE
 		}
 	}
@@ -1999,7 +2041,8 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 		if close_err := file_close(f); close_err != nil {
 			log.errorf("Failed closing file. Error: %v", close_err)
 		}
-		
+				
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2019,6 +2062,7 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 		}
 
 		delete(buffer.samples, s.allocator)
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2026,6 +2070,7 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 		mode = .From_File,
 		file = f,
 		vorbis = vorbis_res,
+		vorbis_buffer = vorbis_buffer,
 		buffer = buffer_handle,
 		playback_settings = {
 			pan = 0,
@@ -2043,6 +2088,7 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 		delete(asd.file_read_buf)
 		delete(buffer.samples, s.allocator)
 		hm.remove(&s.audio_buffers, buffer_handle)
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2075,17 +2121,23 @@ load_audio_stream_from_file :: proc(filename: string) -> Audio_Stream {
 load_audio_stream_from_bytes :: proc(bytes: []u8) -> Audio_Stream {
 	vorbis_err: stbv.Error
 
+	vorbis_buffer := stbv.vorbis_alloc {
+		alloc_buffer = make([^]u8, VORBIS_STATE_SIZE, s.allocator),
+		alloc_buffer_length_in_bytes = VORBIS_STATE_SIZE,
+	}
+
 	// This procedure is specifically made for our use case: Streaming from a file that is already
 	// completely in memory.
 	vorbis_res := stbv.open_memory(
 		raw_data(bytes),
 		i32(len(bytes)),
 		&vorbis_err,
-		&s.vorbis_alloc,
+		&vorbis_buffer,
 	)
 
 	if vorbis_err != nil {
 		log.errorf("Failed opening audio stream from bytes. Error: %v", vorbis_err)
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2098,6 +2150,7 @@ load_audio_stream_from_bytes :: proc(bytes: []u8) -> Audio_Stream {
 		channels = Audio_Channels.Stereo
 	} else{
 		log.errorf("Unsupported number of channels: %v", info.channels)
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2112,6 +2165,7 @@ load_audio_stream_from_bytes :: proc(bytes: []u8) -> Audio_Stream {
 	if buffer_handle_add_err != nil {
 		log.errorf("Failed to load audio stream. Error: %v", buffer_handle_add_err)
 		delete(buffer.samples, s.allocator)
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2120,6 +2174,7 @@ load_audio_stream_from_bytes :: proc(bytes: []u8) -> Audio_Stream {
 		bytes = bytes,
 		vorbis = vorbis_res,
 		buffer = buffer_handle,
+		vorbis_buffer = vorbis_buffer,
 		playback_settings = {
 			pan = 0,
 			volume = 1,
@@ -2133,6 +2188,7 @@ load_audio_stream_from_bytes :: proc(bytes: []u8) -> Audio_Stream {
 		log.errorf("Failed to create audio stream from bytes. Error: %v", stream_add_err)
 		delete(buffer.samples, s.allocator)
 		hm.remove(&s.audio_buffers, buffer_handle)
+		free(vorbis_buffer.alloc_buffer, s.allocator)
 		return AUDIO_STREAM_NONE
 	}
 
@@ -2169,6 +2225,7 @@ destroy_audio_stream :: proc(stream: Audio_Stream) {
 		// don't free the bytes, they are owned by the game
 	}
 
+	free(sd.vorbis_buffer.alloc_buffer, s.allocator)
 	hm.remove(&s.audio_streams, stream)
 }
 
@@ -3518,6 +3575,10 @@ ui_button_width :: proc(text: string, button_height: f32) -> f32 {
 // when no camera is set.
 //
 // Mainly used by the samples in order to create the "Source" button.
+//
+// Note that this does not support zoomed cameras right now, since it uses unscaled mouse positions.
+// As this is experimental, you are probably better off copying this procedure to your own code and
+// modifying it, rather than using it as-is.
 ui_button :: proc(r: Rect, text: string) -> bool {
 	in_rect := point_in_rect(get_mouse_position(), r)
 	bg_color := DARK_GRAY
@@ -3695,6 +3756,18 @@ Window_Mode :: enum {
 
 Init_Options :: struct {
 	window_mode: Window_Mode,
+
+	// Enable to request anti-alias. On most systems this means 4x Multi Sample Anti Alias
+	anti_alias: bool,
+
+	// This hint may disable scaling of the window when created. Scaling here refers to the scaling
+	// that is set for the monitor in the OS settings (the same number returned by
+	// `get_window_scale`).
+	//
+	// Note that this is a _hint_. It only works on some platforms, such as Windows. On other
+	// platforms, such as Linux+Wayland, it does not work, because Wayland always auto scales all
+	// windows.
+	disable_auto_scale_hint: bool,
 }
 
 Shader_Handle :: distinct Handle
@@ -3882,10 +3955,14 @@ Audio_Stream_Mode :: enum {
 	From_Bytes,
 }
 
+// From stb_vorbis.odin "In my test files the maximal-size usage is ~150KB.)"
+VORBIS_STATE_SIZE :: 300 * mem.Kilobyte
+
 Audio_Stream_Data :: struct {
 	handle: Audio_Stream,
 	
 	vorbis: ^stbv.vorbis,
+	vorbis_buffer: stbv.vorbis_alloc,
 	playing_buffer_handle: Playing_Audio_Buffer_Handle,
 	buffer: Audio_Buffer,
 	
@@ -4047,7 +4124,6 @@ State :: struct {
 	playing_audio_buffers: hm.Dynamic_Handle_Map(Playing_Audio_Buffer, Playing_Audio_Buffer_Handle),
 
 	audio_streams: hm.Dynamic_Handle_Map(Audio_Stream_Data, Audio_Stream),
-	vorbis_alloc: stbv.vorbis_alloc,
 
 	// Mixer will never mix in more than 1.5 * AUDIO_MIX_CHUNK_SIZE. So 10 times the chunk size is
 	// ample.
@@ -4301,6 +4377,8 @@ Event_Screen_Resize :: struct {
 // You can also use `k2.get_window_scale()`
 Event_Window_Scale_Changed :: struct {
 	scale: f32,
+	screen_width: int,
+	screen_height: int,
 }
 
 Event_Window_Focused :: struct {}
@@ -4452,7 +4530,7 @@ make_default_projection :: proc(w, h: int) -> matrix[4,4]f32 {
 	return matrix_ortho3d_f32(0, f32(w), f32(h), 0, 0.001, 2)
 }
 
-FONT_DEFAULT_ATLAS_SIZE :: 1024
+FONT_DEFAULT_ATLAS_SIZE :: 2048
 
 _update_font :: proc(fh: Font) {
 	font := &s.fonts[fh]
