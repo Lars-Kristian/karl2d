@@ -734,12 +734,32 @@ draw_quad :: proc(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, color: Color) {
 	s.batch_texture = s.shape_drawing_texture
 
 	batch_vertex(p1, {0, 0}, color)
-	batch_vertex(p2, {0, 0}, color)
-	batch_vertex(p3, {0, 0}, color)
+	batch_vertex(p2, {1.0, 0}, color)
+	batch_vertex(p3, {1.0, 1.0}, color)
 
 	batch_vertex(p1, {0, 0}, color)
-	batch_vertex(p3, {0, 0}, color)
-	batch_vertex(p4, {0, 0}, color)
+	batch_vertex(p3, {1.0, 1.0}, color)
+	batch_vertex(p4, {0, 1.0}, color)
+}
+
+draw_texture_quad :: proc(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, texture: Texture) {
+	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 4 > len(s.vertex_buffer_cpu) {
+		draw_current_batch()
+	}
+
+	if s.batch_texture != s.shape_drawing_texture {
+		draw_current_batch()
+	}
+
+	s.batch_texture = texture.handle
+
+	batch_vertex(p1, {0, 1.0}, WHITE)
+	batch_vertex(p2, {1.0, 1.0}, WHITE)
+	batch_vertex(p3, {1.0, 0}, WHITE)
+
+	batch_vertex(p1, {0, 1.0}, WHITE)
+	batch_vertex(p3, {1.0, 0}, WHITE)
+	batch_vertex(p4, {0, 0}, WHITE)
 }
 
 draw_tris :: proc(p1: Vec2, p2: Vec2, p3: Vec2, color: Color) {
@@ -756,4 +776,97 @@ draw_tris :: proc(p1: Vec2, p2: Vec2, p3: Vec2, color: Color) {
 	batch_vertex(p1, {0, 0}, color)
 	batch_vertex(p2, {0, 0}, color)
 	batch_vertex(p3, {0, 0}, color)
+}
+
+draw_polygon :: proc(center: Vec2, radius: f32, rotation: f32, gon: int = 3, color: Color = WHITE) {
+	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 3 * gon > len(s.vertex_buffer_cpu) {
+		draw_current_batch()
+	}
+
+	if s.batch_texture != s.shape_drawing_texture {
+		draw_current_batch()
+	}
+
+	s.batch_texture = s.shape_drawing_texture
+
+
+	radians_per_segment := math.TAU / f32(gon)
+	segment_rotation := linalg.matrix2_rotate(radians_per_segment)
+	
+
+	prev := Vec2{radius, 0} * linalg.matrix2_rotate(rotation)
+	
+	for s in 1..=gon {
+		p := prev * segment_rotation
+
+		batch_vertex(center + prev, {0, 0}, color)
+		batch_vertex(center + p, {1, 0}, color)
+		batch_vertex(center, {1, 1}, color)
+
+		prev = p
+	}
+}
+
+draw_polygon_outline :: proc(center: Vec2, radius: f32, thickness: f32, rotation: f32, gon: int = 3, color: Color = WHITE) {
+	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 6 * gon > len(s.vertex_buffer_cpu) {
+		draw_current_batch()
+	}
+
+	if s.batch_texture != s.shape_drawing_texture {
+		draw_current_batch()
+	}
+
+	s.batch_texture = s.shape_drawing_texture
+
+	thickness := thickness
+	radius := radius
+	
+	if thickness > radius {
+		thickness = radius
+	} else if thickness < 0 {
+		thickness = -thickness
+		radius += thickness
+	}
+
+	radians_per_segment := math.TAU / f32(gon)
+	segment_rotation := linalg.matrix2_rotate(radians_per_segment)
+	
+
+	prev_p0 := Vec2{radius - thickness, 0} * linalg.matrix2_rotate(rotation)
+	prev_p1 := Vec2{radius, 0} * linalg.matrix2_rotate(rotation)
+	
+	for s in 1..=gon {
+		p0 := prev_p0 * segment_rotation
+		p1 := prev_p1 * segment_rotation
+
+		batch_vertex(center + prev_p0, {0, 0}, color)
+		batch_vertex(center + prev_p1, {1, 0}, color)
+		batch_vertex(center + p1, {1, 1}, color)
+
+		batch_vertex(center + prev_p0, {0, 0}, color)
+		batch_vertex(center + p1, {1, 1}, color)
+		batch_vertex(center + p0, {0, 1}, color)
+
+		prev_p0 = p0
+		prev_p1 = p1
+	}
+}
+
+hex_to_color :: proc(hex: int) -> Color {
+	//RGBA
+	if hex > 0xffffff {
+		r := u8((hex >> 24) & 0xFF)
+		g := u8((hex >> 16) & 0xFF)
+		b := u8((hex >> 8) & 0xFF)
+		a := u8(hex & 0xFF)
+
+		return Color{r, g, b, a}
+	}
+
+	//RGB
+	r := u8((hex >> 16) & 0xFF)
+	g := u8((hex >> 8) & 0xFF)
+	b := u8(hex & 0xFF)
+
+	return Color{r, g, b, 255}
 }
