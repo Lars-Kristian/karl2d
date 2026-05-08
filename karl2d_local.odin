@@ -743,11 +743,15 @@ draw_quad :: proc(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, color: Color) {
 }
 
 draw_texture_quad :: proc(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, texture: Texture) {
-	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 4 > len(s.vertex_buffer_cpu) {
+	if texture.handle == TEXTURE_NONE || texture.width == 0 || texture.height == 0 {
+		return
+	}
+
+	if s.vertex_buffer_cpu_used + s.batch_shader.vertex_size * 6 > len(s.vertex_buffer_cpu) {
 		draw_current_batch()
 	}
 
-	if s.batch_texture != s.shape_drawing_texture {
+	if s.batch_texture != texture.handle {
 		draw_current_batch()
 	}
 
